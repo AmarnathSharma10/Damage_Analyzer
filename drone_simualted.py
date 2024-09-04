@@ -22,7 +22,7 @@ class DroneToDrone:
 
     def get_number(self, n):
         self.number = n % len(self.input)
-        if self.number == 0: self.number += 1
+        if self.number == 0: self.number += len(self.input)
 
     def classify_debris(self, image_path, i):
         # Sample parameters for GSD calculation (these should be adjusted as per your scenario)
@@ -61,39 +61,79 @@ class DroneToDrone:
         total_area_70 = total_area_80 = total_area_90 = total_area_100 = 0
         count_70 = count_80 = count_90 = count_100 = 0
 
+
+        connected_regions_70 = []
+        connected_regions_80 = []
+        connected_regions_90 = []
+        connected_regions_100 = []
+
         for (x, y, w, h) in bounding_boxes:
             region_overlap_count = overlap_counts[y:y + h, x:x + w].max()
             if region_overlap_count >= 4:
-                color = (100, 100, 255)
+                color = (0, 0, 255)
                 total_area_100 += w * h * (gsd ** 2)
                 count_100 += 1
+                connected_regions_100.append((x, y, w, h))
             elif region_overlap_count == 3:
-                color = (100, 200, 255)
+                color = (0, 165, 255)
                 total_area_90 += w * h * (gsd ** 2)
                 count_90 += 1
+                connected_regions_90.append((x, y, w, h))
             elif region_overlap_count == 2:
-                color = (100, 255, 100)
+                color = (0, 255, 255)
                 total_area_80 += w * h * (gsd ** 2)
                 count_80 += 1
+                connected_regions_80.append((x, y, w, h))
             else:
-                color = (255, 100, 100)
+                color = (0, 255, 0)
                 total_area_70 += w * h * (gsd ** 2)
                 count_70 += 1
+                connected_regions_70.append((x, y, w, h))
 
             overlay = output_image.copy()
             cv2.rectangle(overlay, (x, y), (x + w, y + h), color, -1)
-            alpha = 0.4
+            alpha = 0.5
             cv2.addWeighted(overlay, alpha, output_image, 1 - alpha, 0, output_image)
+
         op_name = f"OP{i}.jpg"
         self.output.append(output_image)
         save_image(output_image, self.output_folder, op_name)
 
-        return {
-            "LOW  damage " + " " * 5: {"regions": count_70, "total_area(in m*m)": total_area_70},
-            "MEDIUM damage": {"regions": count_80, "total_area(in m*m)": total_area_80},
-            "HIGH damage ": {"regions": count_90, "total_area(in m*m)": total_area_90},
-            "SEVERE  damage ": {"regions": count_100, "total_area(in m*m)": total_area_100}
 
+        def find_connected_regions(regions):
+            if not regions:
+                return []
+            regions = sorted(regions, key=lambda x: (x[0], x[1]))
+            connected = []
+            current_group = [regions[0]]
+
+            for i in range(1, len(regions)):
+                prev = regions[i - 1]
+                curr = regions[i]
+                if curr[0] <= prev[0] + prev[2] and curr[1] <= prev[1] + prev[3]:
+                    current_group.append(curr)
+                else:
+                    connected.append(len(current_group))
+                    current_group = [curr]
+
+            connected.append(len(current_group))
+            return connected
+
+        # Compute the connected regions for each damage level
+        connected_70 = find_connected_regions(connected_regions_70)
+        connected_80 = find_connected_regions(connected_regions_80)
+        connected_90 = find_connected_regions(connected_regions_90)
+        connected_100 = find_connected_regions(connected_regions_100)
+
+        return {
+            "LOW  damage  GREEN" + " " * 5: {"regions": count_70, "total_area(in m*m)": total_area_70,
+                                       "connected_regions": connected_70},
+            "MEDIUM damage YELLOW": {"regions": count_80, "total_area(in m*m)": total_area_80,
+                              "connected_regions": connected_80},
+            "HIGH damage ORANGE": {"regions": count_90, "total_area(in m*m)": total_area_90,
+                             "connected_regions": connected_90},
+            "SEVERE  damage RED": {"regions": count_100, "total_area(in m*m)": total_area_100,
+                                    "connected_regions": connected_100}
         }
 
     def mainProcess(self):
@@ -133,4 +173,24 @@ def save_image(image, directory, filename):
     else:
         print("No image to save.")
 
+
+if __name__ == "__main__":
+    image_folder = 'input_images'
+    output_folder = 'OUTPUT_IMAGES'
+    if os.path.exists(output_folder):
+        remove_files(output_folder)
+        os.rmdir(output_folder)
+    os.makedirs(output_folder)
+    d = DroneToDrone(output_folder)
+    d.get_input(image_folder)
+    d.get_number(6)
+    d.mainProcess()
+    for report in d.report:
+        for key,val in report.items():
+            print(key)
+            for i,j in val.items():
+                print(f"{i} {j}")
+            print("____________________________________")
+
+        print("________________________________________")
 
